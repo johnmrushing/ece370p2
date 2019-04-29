@@ -24,7 +24,7 @@
 #define BUFFSIZE 1000
 
 #define SPEEDKP 4
-#define PHIKP 4
+#define PHIKP 1.5
 
 char ssid[] = SECRET_SSID;        // your network SSID (name)
 char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
@@ -58,6 +58,10 @@ float velocityLeft = 0, velocityRight = 0, omega = 0;
 
 float leftMotorSet = 0, rightMotorSet = 0;
 
+bool turnLeft = false;
+
+float startingHeadingDeg, startingHeadingRad;
+float relativeHeadingDeg, relativeHeadingRad;
 float currentHeadingRad, averageHeadingRad, errorHeadingRad;
 float currentHeadingDeg, averageHeadingDeg = 0, errorHeadingDeg;
 float verticalAcceleration = 0;
@@ -115,6 +119,8 @@ void leftMotorKP( double speedLeft )
   errorLeft = speedLeft - velLeft;
 
   velocityLeft = SPEEDKP * errorLeft;
+  //Serial.println("velocity left");
+  //Serial.println(velocityLeft);
 }
 
 void rightMotorKP(double speedRight)
@@ -123,17 +129,68 @@ void rightMotorKP(double speedRight)
   errorRight = speedRight - velRight;
 
   velocityRight = SPEEDKP * errorRight;
+  //Serial.println("vel right");
+  //Serial.println(velocityRight);
 }
 
 void phiKP( double phiDesiredDeg )
 {
+ 
+  //averageHeadingDeg = 0.3 * ( phiGlobalDeg % 360 ) + 0.7 * currentHeadingDeg;
 
-  averageHeadingDeg = 0.3 * phiGlobalDeg + 0.7 * currentHeadingDeg;
+  averageHeadingDeg = currentHeadingDeg;
 
+//  if ( phiDesiredDeg < 30 )
+//  {
+//    if ( averageHeadingDeg < 30 ) 
+//      errorHeadingDeg = phiDesiredDeg - averageHeadingDeg;
+//    else if ( averageHeadingDeg >= 30 )
+//      errorHeadingDeg = averageHeadingDeg - phiDesiredDeg;
+//  }
+//  else if ( phiDesiredDeg >= 30 )
+//  {
+//    if ( averageHeadingDeg >= 30 )
+//      errorHeadingDeg = phiDesiredDeg - averageHeadingDeg;
+//    else if ( averageHeadingDeg < 30 )
+//      errorHeadingDeg = phiDesiredDeg - averageHeadingDeg;
+//  }
+
+  //Serial.println(averageHeadingDeg);
+
+  Serial.println("desired:");
+  Serial.println(phiDesiredDeg);
+  Serial.println("actual:");
   Serial.println(averageHeadingDeg);
+  Serial.println("error:");
+  Serial.println(errorHeadingDeg);
+  Serial.println();
 
   errorHeadingDeg = phiDesiredDeg - averageHeadingDeg;
 
+  if( 0 == phiDesiredDeg )
+  {
+    if ( abs( errorHeadingDeg ) < 10 ) errorHeadingDeg = 0;
+    if( averageHeadingDeg >= 0 && averageHeadingDeg < 30 )
+    {
+      turnLeft = true;
+    }
+    else
+    {
+      turnLeft = false;
+    }
+  }
+  else
+  {
+    if( errorHeadingDeg >= 0 )
+    {
+      turnLeft = true;
+    }
+    else
+    {
+      turnLeft = false;
+    }
+  }
+  
   omega = PHIKP * errorHeadingDeg;
 }
 
@@ -199,6 +256,7 @@ void setupIMU()
   compass.enableDefault();
   compass.m_min = (LSM303::vector<int16_t>){-2779, -3143, -2694};
   compass.m_max = (LSM303::vector<int16_t>){+3376, +2853, +3321};
+  startingHeadingDeg = compass.heading();
   Serial.println("imu setup");
 }
 
@@ -218,6 +276,9 @@ void updateIMU()
   compass.read();
   currentHeadingDeg = compass.heading(); // +x axis
   currentHeadingRad = currentHeadingDeg * PI / 180.0;
+
+  relativeHeadingDeg = currentHeadingDeg - startingHeadingDeg;
+  relativeHeadingRad = relativeHeadingDeg * PI / 180.0;
   
   //Serial.println(currentHeadingDeg);
 
@@ -261,29 +322,28 @@ void readPacket()
     switch ( _cmdPacket.mode )
     {
       case 0:
-        Serial.println(_cmdPacket.vel);
-        Serial.println(_cmdPacket.phi);
+        Serial.println( _cmdPacket.vel );
+        Serial.println( _cmdPacket.phi );
         Serial.println("mode 0 - report");
         
         sendResponse();
         
         break;
       case 1:
-        Serial.println(_cmdPacket.vel);
-        Serial.println(_cmdPacket.phi);
+        Serial.println( _cmdPacket.vel );
         Serial.println("mode 1 - drive");
         //parse driving command
 
-        
+        sendResponse();
         
         break;
       case 2:
-        Serial.println(_cmdPacket.vel);
-        Serial.println(_cmdPacket.phi);
-        Serial.println("mode 2 - proemt");
+        Serial.println( _cmdPacket.vel );
+        Serial.println( _cmdPacket.phi );
+        Serial.println("mode 2 - cardinal");
         //parse cardinal command
 
-        
+        sendResponse();
         
         break;
       case 3:
@@ -314,8 +374,27 @@ void checkUDP()
 
 void updateMotors()
 {
-  leftMotorSet = ( ( 2 * velocityLeft ) - ( omega * BASELINE ) ) / ( 2 * WHEELRAD);
-  rightMotorSet = ( ( 2 * velocityRight ) + ( omega * BASELINE ) ) / ( 2 * WHEELRAD);
+  //leftMotorSet = ( ( 2 * velocityLeft ) - ( omega * BASELINE ) ) / ( 2 * WHEELRAD);
+  //rightMotorSet = ( ( 2 * velocityRight ) + ( omega * BASELINE ) ) / ( 2 * WHEELRAD);
+
+  if( _cmdPacket.mode == 2 )
+  {
+    if( !turnLeft )
+    {
+      rightMotorSet = ( abs( omega * BASELINE ) ) / ( 2 * WHEELRAD );
+      leftMotorSet = 0;
+    }
+    else
+    {
+      rightMotorSet = 0;
+      leftMotorSet = ( abs( omega * BASELINE ) ) / ( 2 * WHEELRAD );
+    }
+  }
+  else
+  {
+    rightMotorSet = 2 * velocityRight;
+    leftMotorSet = 2 * velocityLeft;
+  }
 
   if( leftMotorSet > 255) leftMotorSet = 255;
   else if ( leftMotorSet < 0 ) leftMotorSet = 0;
@@ -344,8 +423,8 @@ void setup()
   analogWrite( RM2, 0 );
 
   _cmdPacket.vel = 0;
-  _cmdPacket.phi = currentHeadingDeg;
-  _cmdPacket.mode = 0;
+  _cmdPacket.phi = 180;
+  _cmdPacket.mode = 2;
   
 }
 
@@ -353,14 +432,16 @@ void loop()
 {
   updateIMU();
   
-  //checkUDP();
+  checkUDP();
 
   //rightMotorKP(_cmdPacket.vel);
   //leftMotorKP(_cmdPacket.vel);
 
-  //phiKP(_cmdPacket.phi);
+  phiKP(_cmdPacket.phi);
 
-  //timeUpdate();
+  //phiKP(180);
+  
+  timeUpdate();
 
-  Serial.println(xGlobal);
+  //Serial.println(xGlobal);
 }
