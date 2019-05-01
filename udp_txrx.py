@@ -106,6 +106,13 @@ while True:
 		vel = 0
 		
 		sock.send( cmdPacket( vel, phi, 3 ) )
+
+	elif ( 'r' == key ):
+		print("reset")
+
+		vel = 0
+		
+		sock.send( cmdPacket( vel, phi, 4 ) )
 		
 	else:
 		print("unrecognized")
